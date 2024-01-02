@@ -4,6 +4,7 @@ import cv2
 import rospy
 from std_srvs.srv import Trigger
 import time
+import json
 import os
 import sys
 from ctypes import cdll
@@ -28,6 +29,8 @@ robot = frrpc.RPC('192.168.1.10')
 
 
 def send_start_request():
+    success = False
+
     rospy.wait_for_service('/record/ctrl/start_record_srv')
     try:
         # Check if '/env/info/instruct' is set and not empty
@@ -39,14 +42,18 @@ def send_start_request():
         if response.success:
             instruct = rospy.get_param('/env/info/instruct', "")
             rospy.loginfo(f"Recording started successfully, current instruction is \"{instruct}\".")
+            success = True
+
         else:
             rospy.loginfo("Unable to start recording: " + response.message)
     except rospy.ServiceException as e:
         rospy.logerr("Service call failed: " + str(e))
+    return success
 
 
 def send_end_request():
     global last_end
+    success = False
     rospy.wait_for_service('/record/ctrl/end_record_srv')
     try:
         end_record = rospy.ServiceProxy('/record/ctrl/end_record_srv', Trigger)
@@ -55,11 +62,13 @@ def send_end_request():
             bag_full_path = response.message
             records_bag_full_path.append(bag_full_path)
             rospy.loginfo(f"Recording stopped successfully, save to {bag_full_path}.")
+            success = True
         else:
             rospy.loginfo("Unable to stop recording: " + response.message)
     except rospy.ServiceException as e:
         rospy.logerr("Service call failed: " + str(e))
     last_end = time.time()
+    return success
 
 
 def reverse_kinematics(cart):
@@ -71,6 +80,12 @@ def reverse_kinematics(cart):
     return joint
 
 
+def forward_kinematics(joint):
+    # Placeholder function for reverse kinematics
+    cart = robot.GetForwardKin(joint)[1:]
+    return cart
+
+
 def interpolate_joints(start, end, steps):
     # Linear interpolation between start and end positions
     interpolated = []
@@ -79,38 +94,56 @@ def interpolate_joints(start, end, steps):
     return np.array(interpolated).T  # Transpose to get the correct shape
 
 
-def run_one_episode(goal_cart):
+def run_one_episode(goal_cart, vel=3):
     obs = env.reset()
     current_joint = obs["status"]["jt_cur_pos"][0]
-    print("goal_cart:", goal_cart)
+    current_cart = forward_kinematics(current_joint)
+    print(f"vel {vel}, goal_cart {goal_cart}", )
     goal_joint = reverse_kinematics(goal_cart)
-    num_steps = 50
+
+    distance = np.linalg.norm(np.array(current_cart[:3]) - np.array(goal_cart[:3]))
+    num_steps = max(int(distance / vel), 1)
+
+    d = {"goal_joint": goal_joint, "goal_cart": goal_cart, "vel": vel,
+         "current_joint": current_joint, "current_cart": current_cart}
+    param_value = json.dumps(d)
+    rospy.set_param('/env/info/instruct', param_value)
+
     actions = interpolate_joints(current_joint, goal_joint, num_steps)
-    send_start_request()
-    # print(actions)
+    if not send_start_request():
+        rospy.logerr("Can not start recording, return!")
+        return
+        # print(actions)
     for action in actions:
         action_with_gripper = action.tolist() + [0]
         obs, _, _, info = env.step(action_with_gripper)
-        # for camera_name, image in obs["images"].items():
-        #     cv2.imshow(camera_name, image)
-        # cv2.waitKey(1)  # Display the window until a key is pressed
-    send_end_request()
-    time.sleep(1)
+        for camera_name, image in obs["images"].items():
+            cv2.imshow(camera_name, image)
+        cv2.waitKey(1)  # Display the window until a key is pressed
+    while not rospy.is_shutdown():
+        if send_end_request():
+            break
+        time.sleep(1)
 
 
 # Initialize the environment
 env = EdiEnv()
 
 # Define the bounds of the 3D workspace for x, y, z (x_min, x_max, y_min, y_max, z_min, z_max)
-workspace_bounds = [300, 800, -300, 60, 135, 350]
+workspace_bounds = [300, 800, -300, 60, 140, 350]
 rpy_bounds = [120, 240, -30, 30, -30, 30]
 rpy_fixed = [180, 0, 0]
-
-max_episode = 100
-send_end_request()
+vel_limits = [2, 5]
+max_episode = 10000
+first_end = send_end_request()
+if first_end:
+    rospy.logwarn("It was recording just now and it has been ended...")
 
 for _ in range(max_episode):
     goal_xyz = [np.random.uniform(low, high) for low, high in zip(workspace_bounds[::2], workspace_bounds[1::2])]
     # goal_rpy = [np.random.uniform(low, high) for low, high in zip(rpy_bounds[::2], rpy_bounds[1::2])]
     goal_cart = goal_xyz + rpy_fixed
-    run_one_episode(goal_cart)
+
+    vel = np.random.uniform(vel_limits[0], vel_limits[1])
+
+    run_one_episode(goal_cart, vel)
