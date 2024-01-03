@@ -2,7 +2,6 @@ import os
 
 from data_collection.data import StepLMDBDatasetV2
 
-
 """
 Work on pc@192.168.1.240
 """
@@ -20,6 +19,8 @@ print(f"action: {action}")
 print(f"instruct: {instruct}")
 
 print("Total Length", len(dataset))
+import pdb
+pdb.set_trace()
 
 for i, (obs, action, instruct) in enumerate(dataset):
     for item in (obs, action, instruct):
