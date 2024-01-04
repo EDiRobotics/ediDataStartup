@@ -130,7 +130,7 @@ def run_one_episode(goal_cart, vel=3):
 env = EdiEnv()
 
 # Define the bounds of the 3D workspace for x, y, z (x_min, x_max, y_min, y_max, z_min, z_max)
-workspace_bounds = [300, 800, -300, 60, 140, 350]
+workspace_bounds = [300, 800, -300, 60, 150, 350]
 rpy_bounds = [120, 240, -30, 30, -30, 30]
 rpy_fixed = [180, 0, 0]
 vel_limits = [2, 5]
