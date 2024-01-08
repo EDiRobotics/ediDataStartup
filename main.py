@@ -97,9 +97,14 @@ def interpolate_joints(start, end, steps):
 def run_one_episode(goal_cart, vel=3):
     obs = env.reset()
     current_joint = obs["status"]["jt_cur_pos"][0]
-    current_cart = forward_kinematics(current_joint)
-    print(f"vel {vel}, goal_cart {goal_cart}", )
-    goal_joint = reverse_kinematics(goal_cart)
+    while not rospy.is_shutdown():
+        try:
+            current_cart = forward_kinematics(current_joint)
+            print(f"vel {vel}, goal_cart {goal_cart}", )
+            goal_joint = reverse_kinematics(goal_cart)
+            break
+        except:
+            continue
 
     distance = np.linalg.norm(np.array(current_cart[:3]) - np.array(goal_cart[:3]))
     num_steps = max(int(distance / vel), 1)
